@@ -25,13 +25,13 @@ we will be now making a call to the `foo` pod running in kubernetes. We can eith
 nodeport or ingress. In this example, we will use the nodeport
 
 ```
-$> curl http://<a-k8s-node-ip>:30111/get
+curl http://<a-k8s-node-ip>:30111/get
 ```
 
 now run another replica of `foo` on your laptop. We can simply run this on docker:
 
 ```
-$> docker run -it -p 8001:80 kennethreitz/httpbin:latest gunicorn --access-logfile - -b 0.0.0.0:80 httpbin:app
+docker run -it -p 8001:80 kennethreitz/httpbin:latest gunicorn --access-logfile - -b 0.0.0.0:80 httpbin:app
 ```
 
 Let's detour traffic to our docker version of `foo` by adding the contract header. 
@@ -40,7 +40,7 @@ You would need to know your laptop's IP.
 Let's make the request:
 
 ```
-$> curl -H 'x-devroute: {"foo":"<laptops-ip>:8001"}' http://<a-k8s-node-ip>:30111/get
+curl -H 'x-devroute: {"foo":"<laptops-ip>:8001"}' http://<a-k8s-node-ip>:30111/get
 ```
 
 This request should be now hitting the `foo` running in docker instead of the one running 
