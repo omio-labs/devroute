@@ -1,0 +1,47 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devrouter
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devrouter
+  namespace: devrouter
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: devrouter
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: "30%"
+  template:
+    metadata:
+      labels:
+        app: devrouter
+    spec:
+      imagePullSecrets:
+        - name: registry-secret
+      containers:
+        - name: devrouter
+          image: docker.io/lfundaro/devroute
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devrouter
+  namespace: devrouter
+spec:
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  selector:
+    app: devrouter

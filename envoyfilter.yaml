@@ -1,0 +1,69 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: devrouter-filter
+  namespace: foo
+spec:
+  workloadSelector:
+    labels:
+      app: foo
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: envoy.http_connection_manager
+            subFilter:
+              name: envoy.router
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.lua
+        config:
+          inlineCode: |
+            -- get_req_body extracts the body from request_handle 
+            -- if body is nil, returns the empty string
+            function get_req_body(request_handle)
+                local req_body_buf = request_handle:body() 
+                if req_body_buf ~= nil then
+                    return req_body_buf:getBytes(0, req_body_buf:length())
+                end
+                return ""
+            end
+
+            -- envoy_on_request checks for the presence of `x-devroute` contract header 
+            -- and detours this request to devrouter if there is a service match. A service name
+            -- specified in the contract header matches this filter if it's equal to the service name
+            -- that this Envoy instance is proxying to.
+            function envoy_on_request(request_handle)
+                local contract = request_handle:headers():get("x-devroute")
+                if contract == nil then
+                    return
+                end
+
+                -- check if service name as specified in contract header matches the name of the 
+                -- service that Envoy is proxying to.
+                if string.match(contract, '.*["\']' .. "foo" .. '["\'].*') == nil then
+                    return 
+                end
+
+                -- add matched header so devrouter can pick the right ip:host among 
+                -- multiple components specified in contract.
+                request_handle:headers():add("x-devroute-matched", "foo")
+                -- preserve request headers
+                local in_headers = {}
+                for key, value in pairs(request_handle:headers()) do
+                    in_headers[key] = value
+                end
+                
+                -- call devrouter
+                in_headers["authority"] = "devrouter.devrouter.svc.cluster.local"
+                local resp_headers, resp_body = request_handle:httpCall(
+                    "outbound|80||devrouter.devrouter.svc.cluster.local", 
+                    in_headers,
+                    get_req_body(request_handle),
+                    5000)
+                request_handle:respond(resp_headers, resp_body)
+            end
