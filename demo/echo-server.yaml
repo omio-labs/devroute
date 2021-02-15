@@ -2,21 +2,21 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: foo
+  name: echo-server
   labels:
     istio-injection: enabled
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: foo
-  namespace: foo
+  name: echo-server
+  namespace: echo-server
 spec:
   replicas: 1
   revisionHistoryLimit: 1
   selector:
     matchLabels:
-      app: foo
+      app: echo-server
   strategy:
     rollingUpdate:
       maxUnavailable: 0
@@ -24,12 +24,12 @@ spec:
   template:
     metadata:
       labels:
-        app: foo
+        app: echo-server
     spec:
       imagePullSecrets:
         - name: registry-secret
       containers:
-        - name: foo
+        - name: echo-server
           image: kennethreitz/httpbin
           imagePullPolicy: IfNotPresent
           ports:
@@ -44,31 +44,17 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: foo
-  namespace: foo
+  name: echo-server
+  namespace: echo-server
 spec:
   type: NodePort
   ports:
     - protocol: TCP
       port: 80
       targetPort: 80
+      # the port must be named after the underlying protocol 
+      # otherwise the filter won't work
       name: http
       nodePort: 30111
   selector:
-    app: foo
----
-apiVersion: networking.k8s.io/v1beta1
-kind: Ingress
-metadata:
-  name: foo
-  namespace: foo
-  annotations:
-    ingress.kubernetes.io/rewrite-target: "/"
-spec:
-  rules:
-  - http:
-      paths:
-      - path: /foo/
-        backend:
-          serviceName: foo
-          servicePort: 80
+    app: echo-server

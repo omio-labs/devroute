@@ -1,2 +1,7 @@
+IMAGE=devrouter
+
 package:
-	docker build -t devroute:latest .
+	docker build -t $(IMAGE):latest . 
+
+test:
+	go test -v

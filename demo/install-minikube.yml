@@ -1,0 +1,174 @@
+# Based on https://github.com/Q24/vagrant-box-centos7-minikube
+
+- hosts: all
+  become: yes
+  become_method: sudo
+  tasks:
+
+    - name: install system updates
+      yum: name=* state=latest update_cache=yes
+
+    - name: create /mnt directory
+      file:
+        path: /mnt
+        state: directory
+
+    - name: disable SELinux
+      selinux:
+        state: disabled
+
+    - name: download minikube version latest rpm
+      get_url:
+        url: https://storage.googleapis.com/minikube/releases/latest/minikube-latest.x86_64.rpm
+        dest: /var/tmp/minikube-latest.rpm
+        mode: '0644'
+
+    - name: install minikube version latest rpm
+      yum:
+        name: /var/tmp/minikube-latest.rpm
+
+    - name: delete minikube version latest rpm
+      file:
+        path: /var/tmp/minikube-latest.rpm
+        state: absent
+
+    - name: add docker repository
+      yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable - $basearch
+        baseurl: https://download.docker.com/linux/centos/7/$basearch/stable
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
+
+    - name: install docker-ce version 20.10.3
+      yum:
+        name: docker-ce-20.10.3
+
+    - name: start and enable docker service
+      service:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: add vagrant user to docker group
+      user:
+        name: vagrant
+        groups: docker
+        append: yes
+
+    - name: set bridge-nf-call-iptables = 1
+      lineinfile:
+        path: /etc/sysctl.conf
+        line: net.bridge.bridge-nf-call-iptables = 1
+
+    - name: apply sysctl config
+      shell: sysctl -p
+
+    - name: start minikube
+      shell: minikube start --vm-driver=none --kubernetes-version=1.16.0
+
+    - name: add service-node-port-range parameter to minikube config file
+      lineinfile:
+        state: present
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        line: '    - --service-node-port-range=1024-65535'
+        insertafter: '^.*service-account-key-file.*$'
+
+    - name: start and enable kubelet service
+      service:
+        name: kubelet
+        enabled: yes
+        state: started
+    
+    - name: create dir /home/vagrant/bin
+      file:
+        path: /home/vagrant/bin
+        state: directory
+
+    - name: add kubernetes repository
+      yum_repository:
+        name: Kubernetes
+        description: Kubernetes
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+        gpgcheck: yes
+        gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+    - name: install kubectl version 1.16.0
+      yum:
+        name: kubectl-1.16.0
+
+    - name: copy kubectl conf
+      copy:
+        src: /root/.kube
+        dest: /home/vagrant/
+        remote_src: yes
+        owner: vagrant
+        group: vagrant
+
+    - name: fix kubectl conf
+      replace:
+        path: /home/vagrant/.kube/config
+        regexp: '/root'
+        replace: '/home/vagrant'
+
+    - name: enable kubectl autocompletion
+      lineinfile:
+        path: /home/vagrant/.bashrc
+        line: source <(kubectl completion bash)
+        insertafter: EOF
+
+    - name: enable kubectl alias k
+      lineinfile:
+        path: /home/vagrant/.bashrc
+        line: alias k="kubectl"
+        insertafter: EOF
+
+    - name: enable kubectl alias kc
+      lineinfile:
+        path: /home/vagrant/.bashrc
+        line: alias kc="kubectl"
+        insertafter: EOF
+
+    - name: copy minikube conf
+      copy:
+        src: /root/.minikube
+        dest: /home/vagrant/
+        remote_src: yes
+        owner: vagrant
+        group: vagrant
+
+    - name: download istio
+      ansible.builtin.unarchive:
+        src: https://github.com/istio/istio/releases/download/1.6.14/istioctl-1.6.14-linux-amd64.tar.gz
+        dest: /usr/local/bin/
+        creates: /usr/local/bin/istioctl
+        remote_src: yes
+        owner: vagrant
+        group: vagrant
+
+    - name: install istio IstioOperator
+      shell: /usr/local/bin/istioctl operator init
+
+    - name: install istio
+      shell: |
+        kubectl apply -f istio.yml
+        echo 'waiting for operator to wake up' >&2
+        sleep 120
+
+    - name: ensure istio ready
+      shell: kubectl wait --all pod -n istio-system --for=condition=Ready --timeout=-1s
+
+    - name: deploy devroute
+      shell: kubectl apply -f devrouter.yaml
+
+    - name: deploy echo server
+      shell: kubectl apply -f echo-server.yaml
+
+    - name: deploy envoy filter
+      shell: kubectl apply -f envoyfilter.yaml
+
+    - name: ensure all ready
+      shell: |
+        kubectl wait --all pod -n echo-server --for=condition=Ready --timeout=-1s
+        kubectl wait --all pod -n devrouter --for=condition=Ready --timeout=-1s
+        
